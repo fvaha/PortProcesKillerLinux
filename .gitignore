@@ -1,0 +1,19 @@
+# Rust
+/target
+src-tauri/target
+
+# Node / Frontend
+node_modules
+.DS_Store
+dist/
+build/
+
+# Tauri Junk
+src-tauri/gen/
+src-tauri/bin/
+
+# Temporary files
+*.log
+*.tmp
+.env
+.venv

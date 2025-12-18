@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PortKiller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0f1115; color: #e2e8f0; }
+        .sidebar { background-color: #171a21; width: 240px; }
+        .main-content { background-color: #0f1115; }
+        .glass { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .port-table th { color: #64748b; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .port-table td { padding: 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.02); }
+        .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; }
+        .badge-dev { background: #3b82f622; color: #60a5fa; border: 1px solid #3b82f644; }
+        .badge-sys { background: #f59e0b22; color: #fbbf24; border: 1px solid #f59e0b44; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+    <!-- Sidebar -->
+    <div class="sidebar flex flex-col border-r border-white/5 p-4 space-y-6">
+        <div class="flex items-center space-x-2 px-2">
+            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+        </div>
+
+        <nav class="space-y-1">
+            <p class="text-[10px] uppercase font-bold text-slate-500 px-3 mb-2">Categories</p>
+            <a href="#" class="flex items-center justify-between px-3 py-1.5 rounded-md bg-white/5 text-sm">
+                <span class="flex items-center"><i class="fa-solid fa-list-ul mr-3 w-4"></i> All Ports</span>
+                <span class="text-[10px] text-slate-400" id="total-ports-count">0</span>
+            </a>
+            <a href="#" class="flex items-center px-3 py-1.5 rounded-md text-sm text-slate-400 hover:bg-white/5">
+                <i class="fa-regular fa-star mr-3 w-4"></i> Favorites
+            </a>
+            <a href="#" class="flex items-center px-3 py-1.5 rounded-md text-sm text-slate-400 hover:bg-white/5">
+                <i class="fa-regular fa-eye mr-3 w-4"></i> Watched
+            </a>
+        </nav>
+
+        <nav class="space-y-1">
+            <p class="text-[10px] uppercase font-bold text-slate-500 px-3 mb-2">Process Types</p>
+            <a href="#" class="flex items-center px-3 py-1.5 rounded-md text-sm text-slate-400 hover:bg-white/5">
+                <i class="fa-solid fa-globe mr-3 w-4"></i> Web Server
+            </a>
+            <a href="#" class="flex items-center px-3 py-1.5 rounded-md text-sm text-slate-400 hover:bg-white/5">
+                <i class="fa-solid fa-database mr-3 w-4"></i> Database
+            </a>
+            <a href="#" class="flex items-center px-3 py-1.5 rounded-md text-sm text-slate-400 hover:bg-white/5">
+                <i class="fa-solid fa-hammer mr-3 w-4"></i> Development
+            </a>
+        </nav>
+    </div>
+
+    <!-- Main -->
+    <div class="flex-1 flex flex-col main-content overflow-hidden">
+        <!-- Header -->
+        <header class="h-14 border-b border-white/5 flex items-center justify-between px-6">
+            <div class="flex items-center space-x-4">
+                <h1 class="font-semibold text-sm">PortKiller</h1>
+                <button onclick="loadPorts()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-rotate-right text-xs"></i></button>
+            </div>
+            <div class="flex-1 max-w-md mx-8 relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-500"></i>
+                <input type="text" placeholder="Search ports, processes..." class="w-full bg-white/5 border border-white/5 rounded-md py-1 pl-9 pr-4 text-xs focus:outline-none focus:border-blue-500/50">
+            </div>
+            <div class="flex items-center space-x-3">
+                <button class="text-slate-400 hover:text-white"><i class="fa-solid fa-gear text-sm"></i></button>
+            </div>
+        </header>
+
+        <!-- Table -->
+        <div class="flex-1 overflow-auto">
+            <table class="w-full port-table border-collapse">
+                <thead class="sticky top-0 bg-[#0f1115] z-10 border-b border-white/5">
+                    <tr>
+                        <th class="text-left w-24">Port <i class="fa-solid fa-chevron-up ml-1 text-[8px]"></i></th>
+                        <th class="text-left">Process</th>
+                        <th class="text-left w-20">PID</th>
+                        <th class="text-left w-24">Type</th>
+                        <th class="text-left">Address</th>
+                        <th class="text-left">User</th>
+                        <th class="text-right w-32 px-6">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="ports-body">
+                    <!-- Rows will be injected here -->
+                </tbody>
+            </table>
+        </div>
+        <div class="h-8 border-t border-white/5 px-6 flex items-center text-[10px] text-slate-500">
+            <span id="footer-count">0 ports listening</span>
+        </div>
+    </div>
+
+    <!-- Detail Pane -->
+    <div class="w-72 border-l border-white/5 bg-white/[0.01] flex flex-col items-center justify-center p-8 text-center" id="detail-pane">
+        <i class="fa-solid fa-globe text-4xl text-slate-700 mb-4"></i>
+        <h3 class="text-lg font-medium text-slate-500">No Port Selected</h3>
+        <p class="text-xs text-slate-600 mt-2">Select a port from the list to view details or manage the process.</p>
+    </div>
+
+    <script>
+        async function loadPorts() {
+            try {
+                const response = await fetch('/api/ports');
+                const ports = await response.json();
+                const tbody = document.getElementById('ports-body');
+                tbody.innerHTML = '';
+                
+                ports.forEach(port => {
+                    const row = document.createElement('tr');
+                    row.className = 'hover:bg-white/[0.02] cursor-default transition-colors';
+                    
+                    const isSystem = port.port < 1024;
+                    const badgeClass = isSystem ? 'badge-sys' : 'badge-dev';
+                    const badgeText = isSystem ? 'System' : 'Development';
+
+                    row.innerHTML = `
+                        <td class="font-medium text-sm">
+                            <i class="fa-solid fa-circle text-[6px] text-green-500 mr-2 mb-[1px]"></i>
+                            :${port.port}
+                        </td>
+                        <td class="text-sm">
+                            <span class="flex items-center">
+                                <i class="fa-solid fa-gear text-slate-500 mr-2 text-xs"></i>
+                                ${port.process_name || 'unknown'}
+                            </span>
+                        </td>
+                        <td class="text-xs text-slate-400">${port.pid || '-'}</td>
+                        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                        <td class="text-[10px] text-slate-500 font-mono">${isSystem ? '*' : '127.0.0.1'}</td>
+                        <td class="text-xs text-slate-400">${port.user}</td>
+                        <td class="text-right space-x-3 pr-6">
+                            <button class="text-slate-600 hover:text-slate-400 transition-colors"><i class="fa-regular fa-star text-xs"></i></button>
+                            <button class="text-slate-600 hover:text-slate-400 transition-colors"><i class="fa-regular fa-eye text-xs"></i></button>
+                            <button onclick="killPort(${port.pid})" class="text-red-500/40 hover:text-red-500 transition-colors"><i class="fa-solid fa-circle-xmark text-xs"></i></button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.getElementById('total-ports-count').innerText = ports.length;
+                document.getElementById('footer-count').innerText = `${ports.length} ports listening`;
+            } catch (err) {
+                console.error("Failed to load ports", err);
+            }
+        }
+
+        async function killPort(pid) {
+            if (!pid) return;
+            if (confirm(`Are you sure you want to kill process PID ${pid}?`)) {
+                await fetch(`/api/kill/${pid}`, { method: 'POST' });
+                loadPorts();
+            }
+        }
+
+        setInterval(loadPorts, 5000);
+        loadPorts();
+    </script>
+</body>
+</html>
