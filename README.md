@@ -1,6 +1,6 @@
-# PortKiller Pro (Linux Edition)
+# PortKiller (Linux Edition)
 
-**PortKiller Pro** is a sophisticated, high-performance port management utility designed specifically for the modern Linux desktop. Melding the raw power of **Rust** with a breathtaking **Liquid Glass** aesthetic, it provides developers with a seamless, visual way to monitor and terminate stubborn network processes. Whether you're debugging microservices or cleaning up zombie ports, PortKiller Pro turns a tedious terminal task into a sleek, premium experience.
+PortKiller is a simple and fast tool to help you find and kill stuck ports on Linux. Instead of hunting down process IDs in the terminal with lsof and kill, you can do it all with a single click in a nice-looking interface. It's built with Rust and Tauri, so it's lightweight and doesn't eat up your RAM.
 
 ![PortKiller Main UI](portkillerlinux.png)
 
