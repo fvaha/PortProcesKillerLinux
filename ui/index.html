@@ -462,31 +462,48 @@
     </div>
 
     <script>
-        const { invoke } = window.__TAURI__.core;
-        const { getCurrentWindow } = window.__TAURI__.window;
+        // Check if we are running inside Tauri
+        const isTauri = window.__TAURI__ !== undefined;
+
+        // Safely get Tauri objects
+        const invoke = isTauri ? window.__TAURI__.core.invoke : () => console.warn("Tauri 'invoke' not available");
+        const getCurrentWindow = isTauri ? window.__TAURI__.window.getCurrentWindow : null;
 
         async function initWindow() {
+            if (!isTauri) {
+                console.log("Not running in Tauri environment. Window controls disabled.");
+                return;
+            }
+
             try {
                 const appWindow = getCurrentWindow();
+                console.log("Window controls initialized");
 
-                document.getElementById('win-close').onclick = async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await appWindow.close();
-                };
+                const closeBtn = document.getElementById('win-close');
+                const minBtn = document.getElementById('win-min');
+                const maxBtn = document.getElementById('win-max');
 
-                document.getElementById('win-min').onclick = async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await appWindow.minimize();
-                };
+                if (closeBtn) {
+                    closeBtn.onclick = async (e) => {
+                        console.log("Close clicked");
+                        await appWindow.close();
+                    };
+                }
 
-                document.getElementById('win-max').onclick = async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (await appWindow.isMaximized()) await appWindow.unmaximize();
-                    else await appWindow.maximize();
-                };
+                if (minBtn) {
+                    minBtn.onclick = async (e) => {
+                        console.log("Minimize clicked");
+                        await appWindow.minimize();
+                    };
+                }
+
+                if (maxBtn) {
+                    maxBtn.onclick = async (e) => {
+                        console.log("Maximize clicked");
+                        if (await appWindow.isMaximized()) await appWindow.unmaximize();
+                        else await appWindow.maximize();
+                    };
+                }
             } catch (err) {
                 console.error("Failed to initialize window controls:", err);
             }
