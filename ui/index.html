@@ -349,8 +349,8 @@
                         class="nav-text">Web Apps</span></div>
                 <div class="nav-item" onclick="setFilter('database', this)"><i class="fa-solid fa-database"></i> <span
                         class="nav-text">Databases</span></div>
-                <div class="nav-item" onclick="setFilter('system', this)"><i class="fa-solid fa-microchip"></i> <span
-                        class="nav-text">System</span></div>
+                <div class="nav-item" onclick="setFilter('docker', this)"><i class="fa-brands fa-docker"></i> <span
+                        class="nav-text">Docker</span></div>
             </nav>
 
             <div class="mt-auto px-6 py-4 flex items-center space-x-3 text-slate-500 text-xs">
@@ -459,31 +459,15 @@
     </div>
 
     <script>
-        // Use standard Tauri V2 globals
         const { invoke } = window.__TAURI__.core;
         const { getCurrentWindow } = window.__TAURI__.window;
         const appWindow = getCurrentWindow();
 
-        // Debugging logs to console to see if it's working
-        console.log("PortKiller UI Initialized");
-
-        // Fixed Window Controls for Linux
-        document.getElementById('win-close').onclick = async () => {
-            console.log("Closing...");
-            await appWindow.close();
-        };
-        document.getElementById('win-min').onclick = async () => {
-            console.log("Minimizing...");
-            await appWindow.minimize();
-        };
+        document.getElementById('win-close').onclick = async () => await appWindow.close();
+        document.getElementById('win-min').onclick = async () => await appWindow.minimize();
         document.getElementById('win-max').onclick = async () => {
-            console.log("Toggling Maximize...");
-            // In v2, toggleMaximize is often best handled like this
-            if (await appWindow.isMaximized()) {
-                await appWindow.unmaximize();
-            } else {
-                await appWindow.maximize();
-            }
+            if (await appWindow.isMaximized()) await appWindow.unmaximize();
+            else await appWindow.maximize();
         };
 
         document.getElementById('btn-terminal').onclick = () => invoke('open_terminal');
@@ -513,24 +497,18 @@
         }
 
         async function doWaybarSetup() {
-            if (!confirm("EXPERIMENTAL FEATURE:\n\nThis will attempt to modify your ~/.config/waybar/config and style.css files.\nWhile it tries to be safe, it could potentially break your existing layout.\n\nProceed at your own risk?")) {
-                return;
-            }
-
+            if (!confirm("EXPERIMENTAL FEATURE:\n\nThis will attempt to modify your ~/.config/waybar/config and style.css files.\nProceed at your own risk?")) return;
             const btn = document.getElementById('btn-setup-waybar');
-            const msg = document.getElementById('waybar-msg');
             btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Installing...';
             try {
                 const result = await invoke('setup_waybar');
-                msg.className = 'text-[10px] mt-2 text-center text-green-400';
-                msg.innerText = result;
+                document.getElementById('waybar-msg').className = 'text-green-400 text-[10px] mt-2 text-center';
+                document.getElementById('waybar-msg').innerText = result;
             } catch (err) {
-                msg.className = 'text-[10px] mt-2 text-center text-red-400';
-                msg.innerText = "Error: " + err;
+                document.getElementById('waybar-msg').className = 'text-red-400 text-[10px] mt-2 text-center';
+                document.getElementById('waybar-msg').innerText = "Error: " + err;
             }
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> One-Click Install Module';
         }
 
         document.getElementById('btn-setup-waybar').onclick = doWaybarSetup;
@@ -541,17 +519,12 @@
         async function fetchPorts() {
             const refreshBtn = document.getElementById('refresh-btn');
             refreshBtn.classList.add('loading');
-
             try {
                 allPorts = await invoke('get_ports');
                 renderPorts();
                 document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
-            } catch (err) {
-                console.error("Refresh failed:", err);
-                document.getElementById('status-text').innerText = "Sync Error!";
-            } finally {
-                setTimeout(() => refreshBtn.classList.remove('loading'), 1000);
-            }
+            } catch (err) { console.error(err); }
+            finally { setTimeout(() => refreshBtn.classList.remove('loading'), 1000); }
         }
 
         function setFilter(type, el) {
@@ -570,20 +543,22 @@
             if (currentFilter === 'web') {
                 filtered = filtered.filter(p => [80, 443, 3000, 5000, 8000, 8080, 4200, 5173].includes(parseInt(p.port)));
             } else if (currentFilter === 'database') {
-                filtered = filtered.filter(p => [3306, 5432, 27017, 6379, 1433].includes(parseInt(p.port)));
-            } else if (currentFilter === 'system') {
-                filtered = filtered.filter(p => parseInt(p.port) < 1024);
+                filtered = filtered.filter(p => [3306, 5432, 27017, 6379, 1433, 8086, 9200, 9042, 5984, 5433, 1521, 26379].includes(parseInt(p.port)));
+            } else if (currentFilter === 'docker') {
+                filtered = filtered.filter(p => (p.process_name || '').toLowerCase().includes('docker') || (p.process_name || '').toLowerCase().includes('containerd'));
             }
 
             body.innerHTML = '';
             filtered.forEach(p => {
                 const tr = document.createElement('tr');
                 const isSystem = parseInt(p.port) < 1024;
+                const isDocker = (p.process_name || '').toLowerCase().includes('docker');
+
                 tr.innerHTML = `
                     <td class="font-mono text-blue-400 font-bold">:${p.port}</td>
-                    <td class="font-medium truncate max-w-[120px]" title="${p.process_name}">${p.process_name || 'unknown'}</td>
+                    <td class="font-medium truncate max-w-[120px]" title="${p.process_name}">${p.process_name || 'unknown'} ${isDocker ? '<i class="fa-brands fa-docker text-blue-400 ml-1"></i>' : ''}</td>
                     <td class="text-slate-500 font-mono text-xs">${p.pid || '-'}</td>
-                    <td><span class="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold ${isSystem ? 'bg-orange-500/10 text-orange-400' : 'bg-blue-500/10 text-blue-400'}">${isSystem ? 'System' : 'User App'}</span></td>
+                    <td><span class="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold ${isDocker ? 'bg-blue-500/20 text-blue-300' : isSystem ? 'bg-orange-500/10 text-orange-400' : 'bg-blue-500/10 text-blue-400'}">${isDocker ? 'Docker' : isSystem ? 'System' : 'User App'}</span></td>
                     <td class="text-right"><button class="action-icon hover:text-red-500" onclick="killProc(${p.pid})"><i class="fa-solid fa-circle-xmark"></i></button></td>
                 `;
                 body.appendChild(tr);
@@ -598,7 +573,6 @@
 
         document.getElementById('refresh-btn').onclick = fetchPorts;
         document.getElementById('search-input').oninput = renderPorts;
-
         fetchPorts();
         startAutoRefresh();
     </script>
