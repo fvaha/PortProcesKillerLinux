@@ -63,9 +63,13 @@ jobs:
           APPDIR=$(find src-tauri/target/release/bundle/appimage -name "*.AppDir" -type d 2>/dev/null | head -1)
           if [ -n "$APPDIR" ] && [ -f "logo.png" ]; then
             echo "Copying logo.png to AppDir..."
+            # Copy to AppDir root (required by appimagetool)
             cp logo.png "$APPDIR/app.png" || true
+            # Copy to icon directories
             mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps" || true
             cp logo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/128x128/apps" || true
+            convert logo.png -resize 128x128 "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" || cp logo.png "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" || true
             echo "Logo copied to AppDir"
           else
             echo "AppDir not found or logo.png missing"
