@@ -1,46 +1,93 @@
-name: "Release"
+name: Build and Release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
 
 jobs:
-  release:
+  build-linux:
+    name: Build Linux Packages
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     strategy:
       fail-fast: false
-      matrix:
-        platform: [ubuntu-22.04]
-
-    runs-on: ${{ matrix.platform }}
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: setup node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
+          cache: 'pnpm'
 
-      - name: install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
-      - name: install dependencies (ubuntu only)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libwebkit2gtk-4.0-dev
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
-      - name: install frontend dependencies
-        run: npm install # or yarn install, but we use npx anyway
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Tauri application (DEB, RPM, AppImage)
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action will replace __VERSION__ with the app version from tauri.conf.json
-          releaseName: "PortKiller v__VERSION__"
-          releaseBody: "See the assets below to download the latest version of PortKiller for Linux."
-          releaseDraft: true
+          projectPath: ./
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PP Killer ${{ github.ref_name }}'
+          releaseBody: |
+            ## PP Killer ${{ github.ref_name }}
+            
+            ### Downloads
+            - **DEB** - For Debian/Ubuntu based distributions
+            - **RPM** - For Fedora/RHEL/openSUSE based distributions  
+            - **AppImage** - Universal Linux package (no installation required)
+            
+            ### Installation
+            - **DEB**: `sudo dpkg -i pp-killer_*.deb && sudo apt-get install -f`
+            - **RPM**: `sudo rpm -i pp-killer-*.rpm` or `sudo dnf install pp-killer-*.rpm`
+            - **AppImage**: `chmod +x PP-Killer-*.AppImage && ./PP-Killer-*.AppImage`
+          releaseDraft: false
           prerelease: false
-          args: --verbose
+          args: --bundles deb,rpm,appimage
+
+      - name: Upload artifacts (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          retention-days: 30
+          if-no-files-found: warn
