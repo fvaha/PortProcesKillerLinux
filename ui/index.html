@@ -4,6 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- FIX: Permissive CSP for AppImage JS execution -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob: tauri:; connect-src 'self' https: http: tauri: ipc: ws:;">
     <title>PortKiller Pro</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono&display=swap"
         rel="stylesheet">
@@ -141,7 +144,7 @@
             margin: 2px 12px;
             border-radius: 8px;
             font-size: 13.5px;
-            color: var(--text-dim);
+            color: #e2e8f0;
             display: flex;
             align-items: center;
             transition: all 0.2s;
@@ -152,18 +155,26 @@
             width: 22px;
             font-size: 15px;
             margin-right: 12px;
-            color: var(--accent);
+            color: #60a5fa;
         }
 
         .nav-item:hover,
         .nav-item.active {
             background: rgba(255, 255, 255, 0.06);
-            color: var(--text-main);
+            color: #ffffff;
         }
 
         .nav-item.active {
             background: rgba(59, 130, 246, 0.15);
-            color: #60a5fa;
+            color: #93c5fd;
+        }
+
+        .nav-item.active i {
+            color: #93c5fd;
+        }
+
+        .nav-label {
+            color: #cbd5e1 !important;
         }
 
         .main {
@@ -337,17 +348,20 @@
             </div>
 
             <nav class="mt-8 flex-1 overflow-y-auto">
-                <p class="nav-label px-7 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Monitor
+                <p class="nav-label px-7 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Views
                 </p>
-                <div class="nav-item active" onclick="setFilter('all', this)">
-                    <i class="fa-solid fa-gauge-high"></i> <span class="nav-text">All Ports</span>
+                <div class="nav-item active" onclick="switchView('ports', this)">
+                    <i class="fa-solid fa-network-wired"></i> <span class="nav-text">Ports</span>
                 </div>
-                <div class="nav-item" onclick="setFilter('favorites', this)">
-                    <i class="fa-solid fa-star"></i> <span class="nav-text">Favorites</span>
+                <div class="nav-item" onclick="switchView('processes', this)">
+                    <i class="fa-solid fa-microchip"></i> <span class="nav-text">Processes</span>
                 </div>
 
                 <p class="nav-label px-7 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 mt-8">
-                    Categories</p>
+                    Port Filters</p>
+                <div class="nav-item" onclick="setFilter('all', this)">
+                    <i class="fa-solid fa-gauge-high"></i> <span class="nav-text">All Ports</span>
+                </div>
                 <div class="nav-item" onclick="setFilter('web', this)"><i class="fa-solid fa-globe"></i> <span
                         class="nav-text">Web Apps</span></div>
                 <div class="nav-item" onclick="setFilter('database', this)"><i class="fa-solid fa-database"></i> <span
@@ -356,7 +370,7 @@
                         class="nav-text">Docker</span></div>
             </nav>
 
-            <div class="mt-auto px-6 py-4 flex items-center space-x-3 text-slate-500 text-xs">
+            <div class="mt-auto px-6 py-4 flex items-center space-x-3 text-slate-300 text-xs">
                 <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
                 <span class="sidebar-footer-text" id="status-text">Service Engine Live</span>
             </div>
@@ -386,12 +400,20 @@
 
             <div class="table-wrap">
                 <table>
-                    <thead>
-                        <tr>
+                    <thead id="table-header">
+                        <tr id="ports-header">
                             <th>Port</th>
                             <th>Active Process</th>
                             <th>PID</th>
                             <th>Type</th>
+                            <th class="text-right">Manage</th>
+                        </tr>
+                        <tr id="processes-header" style="display: none;">
+                            <th>PID</th>
+                            <th>Process Name</th>
+                            <th>CPU %</th>
+                            <th>Memory %</th>
+                            <th>User</th>
                             <th class="text-right">Manage</th>
                         </tr>
                     </thead>
@@ -465,6 +487,21 @@
         // Check if we are running inside Tauri
         const isTauri = window.__TAURI__ !== undefined;
 
+        // Visual debug indicator
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log("DOM Loaded");
+        });
+
+        // Global Error Handler for debugging AppImage
+        window.onerror = function (msg, url, lineNo, columnNo, error) {
+            alert('Error: ' + msg + '\nLine: ' + lineNo + '\nURL: ' + url);
+            return false;
+        };
+
+        window.onunhandledrejection = function (event) {
+            alert('Unhandled Rejection: ' + event.reason);
+        };
+
         // Safely get Tauri objects
         const invoke = isTauri ? window.__TAURI__.core.invoke : () => console.warn("Tauri 'invoke' not available");
         const getCurrentWindow = isTauri ? window.__TAURI__.window.getCurrentWindow : null;
@@ -534,7 +571,7 @@
 
         function startAutoRefresh() {
             if (refreshTimer) clearInterval(refreshTimer);
-            refreshTimer = setInterval(fetchPorts, refreshInterval);
+            refreshTimer = setInterval(refreshCurrentView, refreshInterval);
         }
 
         async function doWaybarSetup() {
@@ -555,7 +592,42 @@
         document.getElementById('btn-setup-waybar').onclick = doWaybarSetup;
 
         let allPorts = [];
+        let allProcesses = [];
         let currentFilter = 'all';
+        let currentView = 'ports';
+
+        function switchView(view, el) {
+            currentView = view;
+
+            // Update active nav item - only for view items
+            const viewItems = document.querySelectorAll('.nav-item');
+            viewItems.forEach(item => {
+                const onclick = item.getAttribute('onclick');
+                if (onclick && onclick.includes('switchView')) {
+                    item.classList.remove('active');
+                }
+            });
+            el.classList.add('active');
+
+            // Toggle table headers
+            if (view === 'ports') {
+                document.getElementById('ports-header').style.display = '';
+                document.getElementById('processes-header').style.display = 'none';
+                fetchPorts();
+            } else {
+                document.getElementById('ports-header').style.display = 'none';
+                document.getElementById('processes-header').style.display = '';
+                fetchProcesses();
+            }
+        }
+
+        function refreshCurrentView() {
+            if (currentView === 'ports') {
+                fetchPorts();
+            } else {
+                fetchProcesses();
+            }
+        }
 
         async function fetchPorts() {
             const refreshBtn = document.getElementById('refresh-btn');
@@ -564,14 +636,40 @@
                 allPorts = await invoke('get_ports');
                 renderPorts();
                 document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
-            } catch (err) { console.error(err); }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status-text').innerText = "Error fetching ports";
+            }
+            finally { setTimeout(() => refreshBtn.classList.remove('loading'), 1000); }
+        }
+
+        async function fetchProcesses() {
+            const refreshBtn = document.getElementById('refresh-btn');
+            refreshBtn.classList.add('loading');
+            try {
+                allProcesses = await invoke('get_processes');
+                renderProcesses();
+                document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status-text').innerText = "Error fetching processes";
+            }
             finally { setTimeout(() => refreshBtn.classList.remove('loading'), 1000); }
         }
 
         function setFilter(type, el) {
             currentFilter = type;
-            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+
+            // Update active nav item - only for filter items
+            const filterItems = document.querySelectorAll('.nav-item');
+            filterItems.forEach(item => {
+                const onclick = item.getAttribute('onclick');
+                if (onclick && onclick.includes('setFilter')) {
+                    item.classList.remove('active');
+                }
+            });
             el.classList.add('active');
+
             renderPorts();
         }
 
@@ -590,6 +688,11 @@
             }
 
             body.innerHTML = '';
+            if (filtered.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" class="text-center text-slate-500 py-8">No ports found</td></tr>';
+                return;
+            }
+
             filtered.forEach(p => {
                 const tr = document.createElement('tr');
                 const isSystem = parseInt(p.port) < 1024;
@@ -606,14 +709,62 @@
             });
         }
 
-        async function killProc(pid) {
-            if (!pid) return;
-            await invoke('kill_port', { pid });
-            fetchPorts();
+        function renderProcesses() {
+            const body = document.getElementById('ports-table-body');
+            const query = document.getElementById('search-input').value.toLowerCase();
+
+            let filtered = allProcesses.filter(p =>
+                p.name.toLowerCase().includes(query) ||
+                p.pid.toString().includes(query) ||
+                p.user.toLowerCase().includes(query)
+            );
+
+            body.innerHTML = '';
+            if (filtered.length === 0) {
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-slate-500 py-8">No processes found</td></tr>';
+                return;
+            }
+
+            filtered.forEach(p => {
+                const tr = document.createElement('tr');
+                const cpuFloat = parseFloat(p.cpu);
+                const memFloat = parseFloat(p.mem);
+                const isHighCpu = cpuFloat > 50;
+                const isHighMem = memFloat > 50;
+
+                tr.innerHTML = `
+                    <td class="font-mono text-blue-400 font-bold">${p.pid}</td>
+                    <td class="font-medium truncate max-w-[200px]" title="${p.name}">${p.name}</td>
+                    <td class="font-mono text-xs ${isHighCpu ? 'text-red-400 font-bold' : 'text-slate-400'}">${p.cpu}%</td>
+                    <td class="font-mono text-xs ${isHighMem ? 'text-orange-400 font-bold' : 'text-slate-400'}">${p.mem}%</td>
+                    <td class="text-slate-500 text-xs">${p.user}</td>
+                    <td class="text-right"><button class="action-icon hover:text-red-500" onclick="killProcess(${p.pid})"><i class="fa-solid fa-circle-xmark"></i></button></td>
+                `;
+                body.appendChild(tr);
+            });
         }
 
-        document.getElementById('refresh-btn').onclick = fetchPorts;
-        document.getElementById('search-input').oninput = renderPorts;
+        async function killProc(pid) {
+            if (!pid) return;
+            if (!confirm(`Kill process with PID ${pid}?`)) return;
+            await invoke('kill_port', { pid });
+            setTimeout(refreshCurrentView, 500);
+        }
+
+        async function killProcess(pid) {
+            if (!pid) return;
+            if (!confirm(`Kill process with PID ${pid}?`)) return;
+            await invoke('kill_process', { pid });
+            setTimeout(refreshCurrentView, 500);
+        }
+
+        document.getElementById('refresh-btn').onclick = refreshCurrentView;
+        document.getElementById('search-input').oninput = () => {
+            if (currentView === 'ports') renderPorts();
+            else renderProcesses();
+        };
+
+        // Initial load
         fetchPorts();
         startAutoRefresh();
     </script>
