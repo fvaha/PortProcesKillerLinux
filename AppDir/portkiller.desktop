@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=PortKiller
-Comment=Premium Port and Process Management
-Exec=portkiller
-Icon=portkiller
-Type=Application
-Categories=Development;System;Utility;
-Terminal=false

@@ -52,13 +52,29 @@ if [ -z "$APPIMAGE" ]; then
             echo "Frontend files copied to AppDir"
         fi
         
-        # Ensure app.png exists in AppDir root (required by appimagetool)
-        if [ ! -f "$APPDIR/app.png" ]; then
-            # Try to use logo.png from project root first
-            if [ -f "$PROJECT_ROOT/logo.png" ]; then
-                cp "$PROJECT_ROOT/logo.png" "$APPDIR/app.png"
-                echo "Copied logo.png to AppDir root as app.png"
-            elif [ -f "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" ]; then
+        # Copy logo.png to AppDir as app icon (what Tauri desktop file expects)
+        if [ -f "$PROJECT_ROOT/logo.png" ]; then
+            echo "Copying logo.png to AppDir icon directories..."
+            # Copy to AppDir root (required by appimagetool)
+            cp "$PROJECT_ROOT/logo.png" "$APPDIR/app.png" || true
+            
+            # Copy to all icon directories with name 'app' (what Tauri desktop file uses)
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/32x32/apps" || true
+            convert "$PROJECT_ROOT/logo.png" -resize 32x32 "$APPDIR/usr/share/icons/hicolor/32x32/apps/app.png" 2>/dev/null || cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/32x32/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/64x64/apps" || true
+            convert "$PROJECT_ROOT/logo.png" -resize 64x64 "$APPDIR/usr/share/icons/hicolor/64x64/apps/app.png" 2>/dev/null || cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/64x64/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/128x128/apps" || true
+            convert "$PROJECT_ROOT/logo.png" -resize 128x128 "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" 2>/dev/null || cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps" || true
+            cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256@2/apps" || true
+            convert "$PROJECT_ROOT/logo.png" -resize 512x512 "$APPDIR/usr/share/icons/hicolor/256x256@2/apps/app.png" 2>/dev/null || cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/256x256@2/apps/app.png" || true
+            mkdir -p "$APPDIR/usr/share/icons/hicolor/512x512/apps" || true
+            convert "$PROJECT_ROOT/logo.png" -resize 512x512 "$APPDIR/usr/share/icons/hicolor/512x512/apps/app.png" 2>/dev/null || cp "$PROJECT_ROOT/logo.png" "$APPDIR/usr/share/icons/hicolor/512x512/apps/app.png" || true
+            echo "Logo copied to AppDir icon directories"
+        elif [ ! -f "$APPDIR/app.png" ]; then
+            # Fallback to existing icons
+            if [ -f "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" ]; then
                 cp "$APPDIR/usr/share/icons/hicolor/128x128/apps/app.png" "$APPDIR/app.png"
                 echo "Copied app.png to AppDir root"
             elif [ -f "$APPDIR/usr/share/icons/hicolor/256x256/apps/app.png" ]; then
