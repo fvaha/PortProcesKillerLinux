@@ -226,17 +226,36 @@ fn setup_waybar() -> Result<String, String> {
     let config_path = config_dir.join("config");
     let mut config = fs::read_to_string(&config_path).map_err(|_| "Could not read waybar config")?;
     
-    if !config.contains("\"custom/portkiller\"") {
+    // Find AppImage path - check common locations
+    let appimage_path = std::env::var("APPIMAGE")
+        .or_else(|_| {
+            // Try to find AppImage in common locations
+            let possible_paths = vec![
+                format!("{}/PortKiller-x86_64.AppImage", std::env::current_dir().unwrap_or_default().display()),
+                format!("{}/PP-Killer-x86_64.AppImage", std::env::current_dir().unwrap_or_default().display()),
+                "/opt/ppkiller/PP-Killer-x86_64.AppImage".to_string(),
+                format!("{}/.local/bin/PP-Killer-x86_64.AppImage", home),
+            ];
+            for path in possible_paths {
+                if std::path::Path::new(&path).exists() {
+                    return Ok(path);
+                }
+            }
+            Err(std::env::VarError::NotPresent)
+        })
+        .unwrap_or_else(|_| format!("{}/.local/bin/ppkiller", home)); // Fallback to local bin
+    
+    if !config.contains("\"custom/ppkiller\"") {
         let module_def = format!(r#"
-    "custom/portkiller": {{
+    "custom/ppkiller": {{
         "format": "{{}}",
-        "exec": "{}/.local/bin/portkiller waybar",
+        "exec": "{} waybar",
         "return-type": "json",
-        "on-click": "{}/.local/bin/portkiller menu",
-        "on-click-right": "{}/.local/bin/portkiller",
+        "on-click": "{} menu",
+        "on-click-right": "{}",
         "interval": 5,
         "tooltip": true
-    }},"#, home, home, home);
+    }},"#, appimage_path, appimage_path, appimage_path);
 
         if let Some(pos) = config.find('}') {
             config.insert_str(pos + 1, &module_def);
@@ -248,16 +267,16 @@ fn setup_waybar() -> Result<String, String> {
 
     let css_path = config_dir.join("style.css");
     let mut css = fs::read_to_string(&css_path).unwrap_or_default();
-    if !css.contains("#custom-portkiller") {
+    if !css.contains("#custom-ppkiller") {
         let css_append = r#"
-#custom-portkiller {
+#custom-ppkiller {
     background: rgba(59, 130, 246, 0.1);
     color: #60a5fa;
     border-radius: 8px;
     padding: 0 10px;
     margin: 4px 2px;
 }
-#custom-portkiller.active {
+#custom-ppkiller.active {
     background: rgba(16, 185, 129, 0.15);
     color: #10b981;
 }
@@ -268,13 +287,47 @@ fn setup_waybar() -> Result<String, String> {
 
     let _ = Command::new("killall").arg("-SIGUSR2").arg("waybar").status();
 
-    Ok("Waybar integrated! Please manually add 'custom/portkiller' to your 'modules-right' or 'modules-left' in waybar config.".to_string())
+    Ok("Waybar integrated! Please manually add 'custom/ppkiller' to your 'modules-right' or 'modules-left' in waybar config.".to_string())
 }
 
 // --- Public helpers for main.rs ---
 
 pub fn get_ports_list() -> Vec<PortInfo> {
     get_ports_impl()
+}
+
+pub fn get_processes_list() -> Vec<ProcessInfo> {
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    let users = Users::new_with_refreshed_list();
+    
+    let mut processes = Vec::new();
+    
+    for (pid, process) in system.processes() {
+        let mut user = "unknown".to_string();
+        if let Some(uid) = process.user_id() {
+             if let Some(u) = users.get_user_by_id(uid) {
+                 user = u.name().to_string();
+             }
+        }
+
+        processes.push(ProcessInfo {
+            pid: pid.as_u32() as i32,
+            name: process.name().to_string_lossy().into_owned(),
+            cpu: format!("{:.1}", process.cpu_usage()),
+            mem: format!("{:.1}", (process.memory() as f64 / 1024.0 / 1024.0)), // MB
+            user,
+        });
+    }
+    
+    processes.sort_by(|a, b| {
+        let cpu_a = a.cpu.parse::<f64>().unwrap_or(0.0);
+        let cpu_b = b.cpu.parse::<f64>().unwrap_or(0.0);
+        cpu_b.partial_cmp(&cpu_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    processes.truncate(100);
+    processes
 }
 
 pub fn kill_all_ports() {
@@ -291,6 +344,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .invoke_handler(tauri::generate_handler![get_ports, get_processes, kill_port, kill_process, open_terminal, setup_waybar])
+        .setup(|_app| {
+            // Open devtools in development mode
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.open_devtools();
+                    println!("DevTools opened automatically (debug mode)");
+                } else {
+                    println!("Warning: Could not find 'main' window to open DevTools");
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

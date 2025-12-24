@@ -7,9 +7,11 @@
     <!-- FIX: Permissive CSP for AppImage JS execution -->
     <meta http-equiv="Content-Security-Policy"
         content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob: tauri:; connect-src 'self' https: http: tauri: ipc: ws:;">
-    <title>PortKiller Pro</title>
+    <title>PP Killer</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono&display=swap"
         rel="stylesheet">
+    <!-- Tailwind CSS CDN - for development only -->
+    <!-- In production, use: npm install -D tailwindcss and build with PostCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
@@ -358,9 +360,9 @@
                 </div>
 
                 <p class="nav-label px-7 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 mt-8">
-                    Port Filters</p>
+                    Filters</p>
                 <div class="nav-item" onclick="setFilter('all', this)">
-                    <i class="fa-solid fa-gauge-high"></i> <span class="nav-text">All Ports</span>
+                    <i class="fa-solid fa-gauge-high"></i> <span class="nav-text">All</span>
                 </div>
                 <div class="nav-item" onclick="setFilter('web', this)"><i class="fa-solid fa-globe"></i> <span
                         class="nav-text">Web Apps</span></div>
@@ -368,6 +370,10 @@
                         class="nav-text">Databases</span></div>
                 <div class="nav-item" onclick="setFilter('docker', this)"><i class="fa-brands fa-docker"></i> <span
                         class="nav-text">Docker</span></div>
+                <div class="nav-item" onclick="setFilter('high-cpu', this)"><i class="fa-solid fa-fire"></i> <span
+                        class="nav-text">High CPU</span></div>
+                <div class="nav-item" onclick="setFilter('high-mem', this)"><i class="fa-solid fa-memory"></i> <span
+                        class="nav-text">High Memory</span></div>
             </nav>
 
             <div class="mt-auto px-6 py-4 flex items-center space-x-3 text-slate-300 text-xs">
@@ -380,14 +386,14 @@
         <main class="content main">
             <header>
                 <div class="flex items-center space-x-3 min-w-max">
-                    <h1 class="text-lg font-semibold tracking-tight">PortKiller</h1>
+                    <h1 class="text-lg font-semibold tracking-tight">PP Killer</h1>
                     <button id="refresh-btn" class="action-icon" title="Refresh Now"><i
                             class="fa-solid fa-arrow-rotate-right"></i></button>
                 </div>
 
                 <div class="search-box">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" placeholder="Search ports..." id="search-input">
+                    <input type="text" placeholder="Search port or process..." id="search-input">
                 </div>
 
                 <div class="flex items-center space-x-1 header-actions">
@@ -462,7 +468,7 @@
                             class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 text-[8px] font-bold uppercase tracking-tighter">Experimental</span>
                     </div>
                     <p class="text-[11px] text-slate-400 mb-4 leading-relaxed">
-                        Automatically add the PortKiller module and styling to your Waybar.
+                        Automatically add the PP Killer module and styling to your Waybar.
                         <span class="text-amber-500/80">Risky: This modifies your config files. Use at your own
                             risk.</span>
                     </p>
@@ -475,7 +481,7 @@
 
                 <!-- About Section -->
                 <div class="border-t border-white/5 pt-6">
-                    <h3 class="text-sm font-bold mb-1">About PortKiller Pro</h3>
+                    <h3 class="text-sm font-bold mb-1">About PP Killer</h3>
                     <p class="text-[11px] text-slate-400">Created by: <b>Vahid E.</b> | <a href="https://vaha.net"
                             target="_blank" class="text-blue-400">vaha.net</a></p>
                 </div>
@@ -484,36 +490,153 @@
     </div>
 
     <script>
-        // Check if we are running inside Tauri
-        const isTauri = window.__TAURI__ !== undefined;
+        // Global variables
+        let isRefreshing = false; // Prevent multiple simultaneous refreshes
+        
+        // Wait for Tauri API to be available
+        // Use window object to avoid shadowing issues
+        window.isTauri = false;
+        let invoke = null;
+        let getCurrentWindow = null;
 
-        // Visual debug indicator
+        function initTauriAPI() {
+            console.log("=== Initializing Tauri API ===");
+            console.log("window.__TAURI__:", window.__TAURI__);
+            console.log("window.__TAURI_INTERNALS__:", window.__TAURI_INTERNALS__);
+            
+            // Check multiple ways Tauri might be available
+            if (window.__TAURI__) {
+                window.isTauri = true;
+                console.log("Found window.__TAURI__");
+                console.log("window.__TAURI__ keys:", Object.keys(window.__TAURI__));
+                
+                if (window.__TAURI__.core && window.__TAURI__.core.invoke) {
+                    invoke = window.__TAURI__.core.invoke;
+                    console.log("✓ Found invoke at window.__TAURI__.core.invoke");
+                } else if (window.__TAURI__.invoke) {
+                    invoke = window.__TAURI__.invoke;
+                    console.log("✓ Found invoke at window.__TAURI__.invoke");
+                } else {
+                    console.warn("✗ invoke not found in window.__TAURI__");
+                }
+                
+                if (window.__TAURI__.window && window.__TAURI__.window.getCurrentWindow) {
+                    getCurrentWindow = window.__TAURI__.window.getCurrentWindow;
+                    console.log("✓ Found getCurrentWindow at window.__TAURI__.window.getCurrentWindow");
+                } else {
+                    console.warn("✗ getCurrentWindow not found in window.__TAURI__.window");
+                }
+            } else if (window.__TAURI_INTERNALS__) {
+                window.isTauri = true;
+                console.log("Found window.__TAURI_INTERNALS__");
+                // Try alternative API location
+                if (window.__TAURI_INTERNALS__.core && window.__TAURI_INTERNALS__.core.invoke) {
+                    invoke = window.__TAURI_INTERNALS__.core.invoke;
+                    console.log("✓ Found invoke at window.__TAURI_INTERNALS__.core.invoke");
+                }
+            } else {
+                console.warn("✗ Tauri API not found - not running in Tauri environment");
+            }
+
+            if (!invoke) {
+                invoke = () => {
+                    console.error("Tauri invoke not available. API not loaded.");
+                    return Promise.reject("Tauri API not available");
+                };
+            }
+
+            if (!getCurrentWindow) {
+                getCurrentWindow = () => null;
+            }
+
+            console.log("=== Tauri API Initialization Complete ===");
+            console.log("isTauri:", window.isTauri);
+            console.log("invoke available:", !!invoke);
+            console.log("getCurrentWindow available:", !!getCurrentWindow);
+            
+            // Test invoke if available
+            if (invoke) {
+                console.log("Testing invoke with a simple call...");
+                invoke('get_ports')
+                    .then(result => {
+                        console.log("✓ Test invoke successful! Result:", result);
+                    })
+                    .catch(err => {
+                        console.error("✗ Test invoke failed:", err);
+                    });
+            }
+        }
+
+        // Try to initialize immediately
+        initTauriAPI();
+
+        // Also try after DOM loads (in case Tauri loads later)
         window.addEventListener('DOMContentLoaded', () => {
-            console.log("DOM Loaded");
+            console.log("DOM Loaded, checking Tauri again...");
+            initTauriAPI();
+            // Try again after a short delay
+            setTimeout(initTauriAPI, 100);
+            setTimeout(initTauriAPI, 500);
         });
 
-        // Global Error Handler for debugging AppImage
+        // Listen for Tauri ready event if available
+        if (window.addEventListener) {
+            window.addEventListener('tauri://ready', () => {
+                console.log("Tauri ready event received");
+                initTauriAPI();
+            });
+        }
+
+        // Global Error Handler for debugging
         window.onerror = function (msg, url, lineNo, columnNo, error) {
-            alert('Error: ' + msg + '\nLine: ' + lineNo + '\nURL: ' + url);
+            console.error('=== WINDOW ERROR ===');
+            console.error('Message:', msg);
+            console.error('Line:', lineNo, 'Column:', columnNo);
+            console.error('URL:', url);
+            console.error('Error object:', error);
+            console.error('Stack:', error?.stack);
+            console.error('===================');
+            
+            // Also show in UI for visibility
+            const statusText = document.getElementById('status-text');
+            if (statusText) {
+                statusText.innerText = `ERROR: ${msg} (Line ${lineNo})`;
+                statusText.style.color = '#f43f5e';
+            }
+            
             return false;
         };
 
         window.onunhandledrejection = function (event) {
-            alert('Unhandled Rejection: ' + event.reason);
+            console.error('=== UNHANDLED PROMISE REJECTION ===');
+            console.error('Reason:', event.reason);
+            console.error('Promise:', event.promise);
+            console.error('===================================');
+            
+            const statusText = document.getElementById('status-text');
+            if (statusText) {
+                statusText.innerText = `PROMISE ERROR: ${event.reason}`;
+                statusText.style.color = '#f43f5e';
+            }
         };
 
-        // Safely get Tauri objects
-        const invoke = isTauri ? window.__TAURI__.core.invoke : () => console.warn("Tauri 'invoke' not available");
-        const getCurrentWindow = isTauri ? window.__TAURI__.window.getCurrentWindow : null;
-
         async function initWindow() {
-            if (!isTauri) {
+            if (!window.isTauri) {
                 console.log("Not running in Tauri environment. Window controls disabled.");
+                return;
+            }
+
+            if (!getCurrentWindow) {
+                console.warn("getCurrentWindow not available");
                 return;
             }
 
             try {
                 const appWindow = getCurrentWindow();
+                if (!appWindow) {
+                    console.warn("Failed to get app window");
+                    return;
+                }
                 console.log("Window controls initialized");
 
                 const closeBtn = document.getElementById('win-close');
@@ -522,23 +645,35 @@
 
                 if (closeBtn) {
                     closeBtn.onclick = async (e) => {
-                        console.log("Close clicked");
-                        await appWindow.close();
+                        try {
+                            console.log("Close clicked");
+                            await appWindow.close();
+                        } catch (err) {
+                            console.error("Failed to close window:", err);
+                        }
                     };
                 }
 
                 if (minBtn) {
                     minBtn.onclick = async (e) => {
-                        console.log("Minimize clicked");
-                        await appWindow.minimize();
+                        try {
+                            console.log("Minimize clicked");
+                            await appWindow.minimize();
+                        } catch (err) {
+                            console.error("Failed to minimize window:", err);
+                        }
                     };
                 }
 
                 if (maxBtn) {
                     maxBtn.onclick = async (e) => {
-                        console.log("Maximize clicked");
-                        if (await appWindow.isMaximized()) await appWindow.unmaximize();
-                        else await appWindow.maximize();
+                        try {
+                            console.log("Maximize clicked");
+                            if (await appWindow.isMaximized()) await appWindow.unmaximize();
+                            else await appWindow.maximize();
+                        } catch (err) {
+                            console.error("Failed to maximize window:", err);
+                        }
                     };
                 }
             } catch (err) {
@@ -546,12 +681,31 @@
             }
         }
 
-        initWindow();
+        // Wait a bit for Tauri to fully load
+        setTimeout(() => {
+            initWindow();
+        }, 100);
 
-        document.getElementById('btn-terminal').onclick = () => invoke('open_terminal');
-        document.getElementById('btn-settings').onclick = () => document.getElementById('settings-modal').classList.add('open');
 
-        function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+        document.getElementById('btn-terminal').onclick = async () => {
+            try {
+                await invoke('open_terminal');
+            } catch (err) {
+                console.error("Failed to open terminal:", err);
+            }
+        };
+        document.getElementById('btn-settings').onclick = () => {
+            console.log("Settings button clicked");
+            const modal = document.getElementById('settings-modal');
+            if (modal) {
+                modal.classList.add('open');
+                console.log("Settings modal opened");
+            } else {
+                console.error("Settings modal not found!");
+            }
+        };
+
+        window.closeSettings = function() { document.getElementById('settings-modal').classList.remove('open'); }
 
         function updateOpacity(val) {
             const opacity = val / 100;
@@ -571,7 +725,7 @@
 
         function startAutoRefresh() {
             if (refreshTimer) clearInterval(refreshTimer);
-            refreshTimer = setInterval(refreshCurrentView, refreshInterval);
+            refreshTimer = setInterval(window.refreshCurrentView, refreshInterval);
         }
 
         async function doWaybarSetup() {
@@ -579,12 +733,16 @@
             const btn = document.getElementById('btn-setup-waybar');
             btn.disabled = true;
             try {
+                if (!invoke) {
+                    throw new Error("Tauri API not loaded");
+                }
                 const result = await invoke('setup_waybar');
                 document.getElementById('waybar-msg').className = 'text-green-400 text-[10px] mt-2 text-center';
                 document.getElementById('waybar-msg').innerText = result;
             } catch (err) {
+                console.error("Error setting up waybar:", err);
                 document.getElementById('waybar-msg').className = 'text-red-400 text-[10px] mt-2 text-center';
-                document.getElementById('waybar-msg').innerText = "Error: " + err;
+                document.getElementById('waybar-msg').innerText = "Error: " + (err.message || err);
             }
             btn.disabled = false;
         }
@@ -596,7 +754,12 @@
         let currentFilter = 'all';
         let currentView = 'ports';
 
-        function switchView(view, el) {
+        // Make functions globally available for onclick handlers
+        window.switchView = function(view, el) {
+            console.log("=== switchView called ===");
+            console.log("View:", view);
+            console.log("Current view before switch:", currentView);
+            
             currentView = view;
 
             // Update active nav item - only for view items
@@ -611,17 +774,28 @@
 
             // Toggle table headers
             if (view === 'ports') {
-                document.getElementById('ports-header').style.display = '';
-                document.getElementById('processes-header').style.display = 'none';
+                console.log("Switching to ports view...");
+                const portsHeader = document.getElementById('ports-header');
+                const processesHeader = document.getElementById('processes-header');
+                if (portsHeader) portsHeader.style.display = '';
+                if (processesHeader) processesHeader.style.display = 'none';
+                
+                // Always fetch fresh data when switching to ports
+                console.log("Calling fetchPorts()...");
                 fetchPorts();
             } else {
-                document.getElementById('ports-header').style.display = 'none';
-                document.getElementById('processes-header').style.display = '';
+                console.log("Switching to processes view...");
+                const portsHeader = document.getElementById('ports-header');
+                const processesHeader = document.getElementById('processes-header');
+                if (portsHeader) portsHeader.style.display = 'none';
+                if (processesHeader) processesHeader.style.display = '';
+                
+                console.log("Calling fetchProcesses()...");
                 fetchProcesses();
             }
         }
 
-        function refreshCurrentView() {
+        window.refreshCurrentView = function() {
             if (currentView === 'ports') {
                 fetchPorts();
             } else {
@@ -630,34 +804,100 @@
         }
 
         async function fetchPorts() {
-            const refreshBtn = document.getElementById('refresh-btn');
-            refreshBtn.classList.add('loading');
-            try {
-                allPorts = await invoke('get_ports');
-                renderPorts();
-                document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
-            } catch (err) {
-                console.error(err);
-                document.getElementById('status-text').innerText = "Error fetching ports";
+            if (isRefreshing) {
+                console.log("Already refreshing, skipping...");
+                return;
             }
-            finally { setTimeout(() => refreshBtn.classList.remove('loading'), 1000); }
+            
+            isRefreshing = true;
+            console.log("=== fetchPorts() called ===");
+            const refreshBtn = document.getElementById('refresh-btn');
+            if (refreshBtn) refreshBtn.classList.add('loading');
+            
+            try {
+                if (!invoke) {
+                    console.error("✗ Invoke function not available");
+                    const statusText = document.getElementById('status-text');
+                    if (statusText) {
+                        statusText.innerText = "Tauri API not loaded";
+                        statusText.style.color = '#f43f5e';
+                    }
+                    return;
+                }
+                
+                console.log("✓ Invoke available, calling get_ports...");
+                console.log("Invoke function type:", typeof invoke);
+                
+                const result = await invoke('get_ports');
+                console.log("✓ Received response from get_ports");
+                console.log("Response type:", typeof result);
+                console.log("Response:", result);
+                console.log("Is array:", Array.isArray(result));
+                console.log("Length:", result?.length || 0);
+                
+                allPorts = result || [];
+                console.log("allPorts set to:", allPorts);
+                
+                renderPorts();
+                
+                const statusText = document.getElementById('status-text');
+                if (statusText) {
+                    statusText.innerText = "Last sync: " + new Date().toLocaleTimeString();
+                    statusText.style.color = '';
+                }
+            } catch (err) {
+                console.error("✗ Error fetching ports:", err);
+                console.error("Error name:", err.name);
+                console.error("Error message:", err.message);
+                console.error("Error stack:", err.stack);
+                
+                const statusText = document.getElementById('status-text');
+                if (statusText) {
+                    statusText.innerText = "Error: " + (err.message || err);
+                    statusText.style.color = '#f43f5e';
+                }
+            }
+            finally { 
+                isRefreshing = false;
+                if (refreshBtn) {
+                    setTimeout(() => refreshBtn.classList.remove('loading'), 1000);
+                }
+            }
         }
 
         async function fetchProcesses() {
+            if (isRefreshing) {
+                console.log("Already refreshing, skipping...");
+                return;
+            }
+            
+            isRefreshing = true;
             const refreshBtn = document.getElementById('refresh-btn');
-            refreshBtn.classList.add('loading');
+            if (refreshBtn) refreshBtn.classList.add('loading');
             try {
+                if (!invoke) {
+                    console.error("Invoke function not available");
+                    document.getElementById('status-text').innerText = "Tauri API not loaded";
+                    return;
+                }
+                console.log("Calling get_processes...");
                 allProcesses = await invoke('get_processes');
+                console.log("Received processes:", allProcesses?.length || 0);
                 renderProcesses();
                 document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
             } catch (err) {
-                console.error(err);
-                document.getElementById('status-text').innerText = "Error fetching processes";
+                console.error("Error fetching processes:", err);
+                document.getElementById('status-text').innerText = "Error fetching processes: " + (err.message || err);
             }
-            finally { setTimeout(() => refreshBtn.classList.remove('loading'), 1000); }
+            finally { 
+                isRefreshing = false;
+                if (refreshBtn) {
+                    setTimeout(() => refreshBtn.classList.remove('loading'), 1000);
+                }
+            }
         }
 
-        function setFilter(type, el) {
+        window.setFilter = function(type, el) {
             currentFilter = type;
 
             // Update active nav item - only for filter items
@@ -670,12 +910,46 @@
             });
             el.classList.add('active');
 
-            renderPorts();
+            // Apply filter to current view
+            if (currentView === 'ports') {
+                renderPorts();
+            } else {
+                renderProcesses();
+            }
         }
 
         function renderPorts() {
+            console.log("=== renderPorts() called ===");
+            console.log("allPorts:", allPorts);
+            console.log("allPorts length:", allPorts?.length || 0);
+            console.log("currentView:", currentView);
+            
+            // Make sure we're in ports view
+            if (currentView !== 'ports') {
+                console.warn("renderPorts called but currentView is:", currentView, "- skipping render");
+                return;
+            }
+            
             const body = document.getElementById('ports-table-body');
-            const query = document.getElementById('search-input').value.toLowerCase();
+            if (!body) {
+                console.error("✗ ports-table-body not found!");
+                return;
+            }
+            
+            // Make sure ports header is visible
+            const portsHeader = document.getElementById('ports-header');
+            const processesHeader = document.getElementById('processes-header');
+            if (portsHeader) {
+                portsHeader.style.display = '';
+                console.log("✓ Ports header made visible");
+            }
+            if (processesHeader) {
+                processesHeader.style.display = 'none';
+                console.log("✓ Processes header hidden");
+            }
+            
+            const query = document.getElementById('search-input')?.value.toLowerCase() || '';
+            console.log("Search query:", query);
 
             let filtered = allPorts.filter(p => p.port.includes(query) || (p.process_name || '').toLowerCase().includes(query));
 
@@ -686,12 +960,16 @@
             } else if (currentFilter === 'docker') {
                 filtered = filtered.filter(p => (p.process_name || '').toLowerCase().includes('docker') || (p.process_name || '').toLowerCase().includes('containerd'));
             }
+            // Note: high-cpu and high-mem filters don't apply to ports view
 
             body.innerHTML = '';
             if (filtered.length === 0) {
+                console.log("No ports to display (filtered array is empty)");
                 body.innerHTML = '<tr><td colspan="5" class="text-center text-slate-500 py-8">No ports found</td></tr>';
                 return;
             }
+            
+            console.log("Rendering", filtered.length, "ports");
 
             filtered.forEach(p => {
                 const tr = document.createElement('tr');
@@ -719,54 +997,140 @@
                 p.user.toLowerCase().includes(query)
             );
 
+            // Apply filters
+            if (currentFilter === 'high-cpu') {
+                filtered = filtered.filter(p => parseFloat(p.cpu) > 50);
+            } else if (currentFilter === 'high-mem') {
+                filtered = filtered.filter(p => parseFloat(p.mem) > 1000); // > 1GB
+            } else if (currentFilter === 'web') {
+                filtered = filtered.filter(p => ['node', 'npm', 'yarn', 'pnpm', 'python', 'php', 'apache', 'nginx', 'httpd'].some(term => p.name.toLowerCase().includes(term)));
+            } else if (currentFilter === 'database') {
+                filtered = filtered.filter(p => ['mysql', 'postgres', 'mongodb', 'redis', 'mariadb', 'sqlite', 'cassandra'].some(term => p.name.toLowerCase().includes(term)));
+            } else if (currentFilter === 'docker') {
+                filtered = filtered.filter(p => p.name.toLowerCase().includes('docker') || p.name.toLowerCase().includes('containerd'));
+            }
+
             body.innerHTML = '';
             if (filtered.length === 0) {
                 body.innerHTML = '<tr><td colspan="6" class="text-center text-slate-500 py-8">No processes found</td></tr>';
                 return;
             }
 
+            // Use DocumentFragment for better performance
+            const fragment = document.createDocumentFragment();
+            
             filtered.forEach(p => {
                 const tr = document.createElement('tr');
                 const cpuFloat = parseFloat(p.cpu);
-                const memFloat = parseFloat(p.mem);
+                const memFloat = parseFloat(p.mem); // This is in MB, not percentage
                 const isHighCpu = cpuFloat > 50;
-                const isHighMem = memFloat > 50;
+                const isHighMem = memFloat > 1000; // High memory if > 1GB
+
+                // Format CPU nicely (ensure it's a percentage)
+                const cpuDisplay = cpuFloat.toFixed(1) + '%';
+
+                // Format memory nicely
+                let memDisplay = '';
+                if (memFloat >= 1024) {
+                    memDisplay = (memFloat / 1024).toFixed(1) + ' GB';
+                } else {
+                    memDisplay = memFloat.toFixed(1) + ' MB';
+                }
 
                 tr.innerHTML = `
                     <td class="font-mono text-blue-400 font-bold">${p.pid}</td>
                     <td class="font-medium truncate max-w-[200px]" title="${p.name}">${p.name}</td>
-                    <td class="font-mono text-xs ${isHighCpu ? 'text-red-400 font-bold' : 'text-slate-400'}">${p.cpu}%</td>
-                    <td class="font-mono text-xs ${isHighMem ? 'text-orange-400 font-bold' : 'text-slate-400'}">${p.mem}%</td>
+                    <td class="font-mono text-xs ${isHighCpu ? 'text-red-400 font-bold' : 'text-slate-400'}" title="CPU Usage: ${cpuDisplay}">${cpuDisplay}</td>
+                    <td class="font-mono text-xs ${isHighMem ? 'text-orange-400 font-bold' : 'text-slate-400'}" title="${memFloat.toFixed(1)} MB">${memDisplay}</td>
                     <td class="text-slate-500 text-xs">${p.user}</td>
                     <td class="text-right"><button class="action-icon hover:text-red-500" onclick="killProcess(${p.pid})"><i class="fa-solid fa-circle-xmark"></i></button></td>
                 `;
-                body.appendChild(tr);
+                fragment.appendChild(tr);
             });
+            
+            body.appendChild(fragment);
         }
 
-        async function killProc(pid) {
+        window.killProc = async function(pid) {
             if (!pid) return;
             if (!confirm(`Kill process with PID ${pid}?`)) return;
-            await invoke('kill_port', { pid });
-            setTimeout(refreshCurrentView, 500);
+            try {
+                if (!invoke) {
+                    console.error("Invoke function not available");
+                    alert("Tauri API not loaded");
+                    return;
+                }
+                await invoke('kill_port', { pid });
+                setTimeout(window.refreshCurrentView, 500);
+            } catch (err) {
+                console.error("Error killing port:", err);
+                alert("Failed to kill process: " + (err.message || err));
+            }
         }
 
-        async function killProcess(pid) {
+        window.killProcess = async function(pid) {
             if (!pid) return;
             if (!confirm(`Kill process with PID ${pid}?`)) return;
-            await invoke('kill_process', { pid });
-            setTimeout(refreshCurrentView, 500);
+            try {
+                if (!invoke) {
+                    console.error("Invoke function not available");
+                    alert("Tauri API not loaded");
+                    return;
+                }
+                await invoke('kill_process', { pid });
+                setTimeout(window.refreshCurrentView, 500);
+            } catch (err) {
+                console.error("Error killing process:", err);
+                alert("Failed to kill process: " + (err.message || err));
+            }
         }
 
-        document.getElementById('refresh-btn').onclick = refreshCurrentView;
+        document.getElementById('refresh-btn').onclick = () => {
+            console.log("Refresh button clicked");
+            console.log("Current view:", currentView);
+            console.log("invoke available:", !!invoke);
+            window.refreshCurrentView();
+        };
         document.getElementById('search-input').oninput = () => {
             if (currentView === 'ports') renderPorts();
             else renderProcesses();
         };
 
-        // Initial load
-        fetchPorts();
-        startAutoRefresh();
+        // Initial load - wait for Tauri to be ready
+        console.log("Setting up initial load...");
+        
+        function tryInitialLoad() {
+            console.log("=== Attempting initial load ===");
+            console.log("invoke available:", !!invoke);
+            console.log("isTauri:", window.isTauri);
+            console.log("window.__TAURI__:", !!window.__TAURI__);
+            
+            if (invoke) {
+                console.log("✓ Invoke available, starting fetchPorts...");
+                fetchPorts();
+                startAutoRefresh();
+            } else {
+                console.error("✗ Invoke not available yet");
+                const statusText = document.getElementById('status-text');
+                if (statusText) {
+                    statusText.innerText = "Waiting for Tauri API...";
+                    statusText.style.color = '#fbbf24';
+                }
+                // Retry after a delay
+                setTimeout(tryInitialLoad, 500);
+            }
+        }
+        
+        // Try immediately if DOM is already loaded
+        if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', () => {
+                console.log("DOM Content Loaded");
+                setTimeout(tryInitialLoad, 500);
+            });
+        } else {
+            console.log("DOM already loaded");
+            setTimeout(tryInitialLoad, 500);
+        }
     </script>
 </body>
 

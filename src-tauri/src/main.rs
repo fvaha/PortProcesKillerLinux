@@ -3,10 +3,11 @@
 
 use clap::{Parser, Subcommand};
 use std::process::{Command, Stdio};
+use regex::Regex;
 
 #[derive(Parser)]
-#[command(name = "portkiller")]
-#[command(about = "A premium Linux port of Port Killer", long_about = None)]
+#[command(name = "ppkiller")]
+#[command(about = "PP Killer - Port and Process Manager", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -37,16 +38,51 @@ fn main() {
             match cli.command {
                 Some(Commands::Waybar) => {
                     let ports = app_lib::get_ports_list();
-                    if ports.is_empty() {
-                        println!("{}", serde_json::json!({ "text": "", "tooltip": "No active ports", "class": "empty" }));
+                    let processes = app_lib::get_processes_list();
+                    
+                    // Get top 10 processes by CPU or memory
+                    let mut top_processes: Vec<_> = processes.iter()
+                        .filter_map(|p| {
+                            let cpu = p.cpu.parse::<f64>().ok()?;
+                            let mem = p.mem.parse::<f64>().ok()?;
+                            Some((p, cpu, mem))
+                        })
+                        .collect();
+                    top_processes.sort_by(|a, b| {
+                        (b.1 + b.2 / 10.0).partial_cmp(&(a.1 + a.2 / 10.0)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let top_10: Vec<_> = top_processes.iter().take(10).map(|(p, _, _)| p).collect();
+                    
+                    let port_count = ports.len();
+                    let process_count = processes.len();
+                    
+                    if port_count == 0 && process_count == 0 {
+                        println!("{}", serde_json::json!({ "text": "", "tooltip": "No active ports or processes", "class": "empty" }));
                         return;
                     }
-                    let text = format!("󰠵 {}", ports.len());
-                    let mut tooltip = String::from("<b>Active Ports</b>\n");
+                    
+                    let text = format!("󰠵 {} | 󰍛 {}", port_count, process_count);
+                    let mut tooltip = String::from("<b>PP Killer</b>\n");
+                    tooltip.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+                    tooltip.push_str(&format!("<b>Active Ports: {}</b>\n", port_count));
                     for p in &ports {
-                        tooltip.push_str(&format!("<span color='#a6e3a1'></span>  <b>{}</b>: {} <span color='#6c7086'>(PID: {:?})</span>\n", 
+                        tooltip.push_str(&format!("<span color='#a6e3a1'></span>  <b>:{}</b> {} <span color='#6c7086'>(PID: {})</span>\n", 
                             p.port, p.process_name.as_deref().unwrap_or("unknown"), p.pid.unwrap_or(0)));
                     }
+                    tooltip.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+                    tooltip.push_str(&format!("<b>Top Processes (by CPU/Memory):</b>\n"));
+                    for p in top_10 {
+                        let cpu = p.cpu.parse::<f64>().unwrap_or(0.0);
+                        let mem = p.mem.parse::<f64>().unwrap_or(0.0);
+                        let mem_display = if mem >= 1024.0 {
+                            format!("{:.1}GB", mem / 1024.0)
+                        } else {
+                            format!("{:.1}MB", mem)
+                        };
+                        tooltip.push_str(&format!("<span color='#f9e2af'>󰍛</span>  <b>{}</b> CPU: {:.1}% Mem: {} <span color='#6c7086'>(PID: {})</span>\n", 
+                            p.name, cpu, mem_display, p.pid));
+                    }
+                    
                     println!("{}", serde_json::json!({
                         "text": text, "tooltip": tooltip.trim_end(), "class": "active"
                     }));
@@ -82,21 +118,61 @@ fn main() {
 
 fn run_menu() {
     let ports = app_lib::get_ports_list();
-    let mut input = String::new();
-    input.push_str("󰄬  Open PortKiller GUI                             ⌘O\n");
-    input.push_str("----------------------------------------------------\n");
+    let processes = app_lib::get_processes_list();
     
-    for p in &ports {
-        let name = p.process_name.as_deref().unwrap_or("unknown");
-        input.push_str(&format!("  <span color='#a6e3a1'></span>  <b>:{}</b>                    {:<15}  <span color='#6c7086'>PID {}</span>\n", 
-            p.port, name, p.pid.unwrap_or(0)));
+    // Get top 10 processes by CPU/memory
+    let mut top_processes: Vec<_> = processes.iter()
+        .filter_map(|p| {
+            let cpu = p.cpu.parse::<f64>().ok()?;
+            let mem = p.mem.parse::<f64>().ok()?;
+            Some((p, cpu, mem))
+        })
+        .collect();
+    top_processes.sort_by(|a, b| {
+        (b.1 + b.2 / 10.0).partial_cmp(&(a.1 + a.2 / 10.0)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_10: Vec<_> = top_processes.iter().take(10).map(|(p, _, _)| p).collect();
+    
+    let mut input = String::new();
+    input.push_str("󰄬  Open PP Killer GUI                             ⌘O\n");
+    input.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    input.push_str("<b>󰠵 PORTS</b>                                    <span color='#6c7086'>Tab 1</span>\n");
+    input.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    
+    if ports.is_empty() {
+        input.push_str("  <span color='#6c7086'>No active ports</span>\n");
+    } else {
+        for p in &ports {
+            let name = p.process_name.as_deref().unwrap_or("unknown");
+            input.push_str(&format!("  <span color='#a6e3a1'></span>  <b>:{}</b>                    {:<15}  <span color='#6c7086'>PID {}</span>\n", 
+                p.port, name, p.pid.unwrap_or(0)));
+        }
     }
     
-    input.push_str("----------------------------------------------------\n");
+    input.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    input.push_str("<b>󰍛 PROCESSES</b>                               <span color='#6c7086'>Tab 2</span>\n");
+    input.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    
+    if top_10.is_empty() {
+        input.push_str("  <span color='#6c7086'>No processes</span>\n");
+    } else {
+        for p in top_10 {
+            let cpu = p.cpu.parse::<f64>().unwrap_or(0.0);
+            let mem = p.mem.parse::<f64>().unwrap_or(0.0);
+            let mem_display = if mem >= 1024.0 {
+                format!("{:.1}GB", mem / 1024.0)
+            } else {
+                format!("{:.1}MB", mem)
+            };
+            input.push_str(&format!("  <span color='#f9e2af'>󰍛</span>  <b>{}</b>  CPU: {:.1}%  Mem: {}  <span color='#6c7086'>PID {}</span>\n", 
+                p.name, cpu, mem_display, p.pid));
+        }
+    }
+    
+    input.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     input.push_str("󰑐  Refresh                                       ⌘R\n");
-    input.push_str("󰦢  <span color='#f38ba8'>Kill All</span>                                       ⌘K\n");
-    input.push_str("󰒓  Settings...                                    ⌘,\n");
-    input.push_str("󰈆  Quit PortKiller                                ⌘Q\n");
+    input.push_str("󰦢  <span color='#f38ba8'>Kill All Ports</span>                              ⌘K\n");
+    input.push_str("󰈆  Quit                                          ⌘Q\n");
 
     let rofi_theme = r#"
         * {
@@ -129,7 +205,7 @@ fn run_menu() {
             text-color: #f5c2e7;
         }
         entry {
-            placeholder: " Search ports, processes...";
+            placeholder: " Search port or process...";
             placeholder-color: #585b70;
         }
         listview {
@@ -161,12 +237,36 @@ fn run_menu() {
         let output = child.wait_with_output().expect("failed read rofi");
         let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-        if selected.contains("Open PortKiller") {
-            let _ = Command::new("portkiller").spawn(); // Open GUI
+        // Find AppImage path
+        let appimage_path = std::env::var("APPIMAGE")
+            .or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                let possible_paths = vec![
+                    format!("{}/PP-Killer-x86_64.AppImage", std::env::current_dir().unwrap_or_default().display()),
+                    format!("{}/PortKiller-x86_64.AppImage", std::env::current_dir().unwrap_or_default().display()),
+                    "/opt/ppkiller/PP-Killer-x86_64.AppImage".to_string(),
+                    format!("{}/.local/bin/PP-Killer-x86_64.AppImage", home),
+                ];
+                for path in possible_paths {
+                    if std::path::Path::new(&path).exists() {
+                        return Ok(path);
+                    }
+                }
+                Err(std::env::VarError::NotPresent)
+            })
+            .unwrap_or_else(|_| "ppkiller".to_string());
+        
+        if selected.contains("Open PP Killer") {
+            // Try to launch AppImage, fallback to command
+            if appimage_path.ends_with(".AppImage") {
+                let _ = Command::new(&appimage_path).spawn();
+            } else {
+                let _ = Command::new(&appimage_path).spawn();
+            }
         } else if selected.contains("Kill All") {
-            let _ = Command::new("pkexec").args(["portkiller", "kill-all"]).status();
+            let _ = Command::new("pkexec").args([&appimage_path, "kill-all"]).status();
         } else if selected.contains("PID") {
-            let re = regex::Regex::new(r"PID (\d+)").unwrap();
+            let re = Regex::new(r"PID (\d+)").unwrap();
             if let Some(caps) = re.captures(&selected) {
                 let pid = caps.get(1).unwrap().as_str();
                 let _ = Command::new("pkexec").args(["kill", "-9", pid]).status();

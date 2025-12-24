@@ -4,7 +4,8 @@
     "description": "Premium Port Management for Linux",
     "main": "index.js",
     "scripts": {
-        "tauri": "tauri"
+        "tauri": "tauri",
+        "dev:server": "node ui/dev-server.js"
     },
     "devDependencies": {
         "@tauri-apps/cli": "^2.1.0"
