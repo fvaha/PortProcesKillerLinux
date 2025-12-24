@@ -60,18 +60,89 @@ jobs:
 
       - name: Find built packages
         run: |
-          echo "Searching for packages..."
-          find . -name "*.deb" -type f 2>/dev/null | head -5
-          find . -name "*.rpm" -type f 2>/dev/null | head -5
-          find . -name "*.AppImage" -type f 2>/dev/null | head -5
-          echo "Checking bundle directory..."
-          ls -la src-tauri/target/release/bundle/ 2>/dev/null || echo "Bundle directory not found"
-          ls -la src-tauri/target/release/bundle/deb/ 2>/dev/null || echo "DEB directory not found"
-          ls -la src-tauri/target/release/bundle/rpm/ 2>/dev/null || echo "RPM directory not found"
-          ls -la src-tauri/target/release/bundle/appimage/ 2>/dev/null || echo "AppImage directory not found"
+          echo "=== Searching for packages ==="
+          echo "Current directory: $(pwd)"
+          echo ""
+          echo "Searching for .deb files:"
+          find . -name "*.deb" -type f 2>/dev/null | head -10 || echo "No .deb files found"
+          echo ""
+          echo "Searching for .rpm files:"
+          find . -name "*.rpm" -type f 2>/dev/null | head -10 || echo "No .rpm files found"
+          echo ""
+          echo "Searching for .AppImage files:"
+          find . -name "*.AppImage" -type f 2>/dev/null | head -10 || echo "No .AppImage files found"
+          echo ""
+          echo "=== Checking bundle directory structure ==="
+          if [ -d "src-tauri/target/release/bundle" ]; then
+            echo "Bundle directory exists:"
+            ls -la src-tauri/target/release/bundle/ || echo "Cannot list bundle directory"
+            echo ""
+            if [ -d "src-tauri/target/release/bundle/deb" ]; then
+              echo "DEB directory contents:"
+              ls -la src-tauri/target/release/bundle/deb/ || echo "Cannot list DEB directory"
+            else
+              echo "DEB directory not found"
+            fi
+            echo ""
+            if [ -d "src-tauri/target/release/bundle/rpm" ]; then
+              echo "RPM directory contents:"
+              ls -la src-tauri/target/release/bundle/rpm/ || echo "Cannot list RPM directory"
+            else
+              echo "RPM directory not found"
+            fi
+            echo ""
+            if [ -d "src-tauri/target/release/bundle/appimage" ]; then
+              echo "AppImage directory contents:"
+              ls -la src-tauri/target/release/bundle/appimage/ || echo "Cannot list AppImage directory"
+            else
+              echo "AppImage directory not found"
+            fi
+          else
+            echo "Bundle directory does not exist!"
+            echo "Checking if target directory exists:"
+            ls -la src-tauri/target/ 2>/dev/null || echo "Target directory not found"
+          fi
+          echo ""
+          echo "=== Saving package paths to file ==="
+          find . -name "*.deb" -type f 2>/dev/null > /tmp/deb_files.txt || touch /tmp/deb_files.txt
+          find . -name "*.rpm" -type f 2>/dev/null > /tmp/rpm_files.txt || touch /tmp/rpm_files.txt
+          find . -name "*.AppImage" -type f 2>/dev/null > /tmp/appimage_files.txt || touch /tmp/appimage_files.txt
+          echo "DEB files found: $(wc -l < /tmp/deb_files.txt)"
+          echo "RPM files found: $(wc -l < /tmp/rpm_files.txt)"
+          echo "AppImage files found: $(wc -l < /tmp/appimage_files.txt)"
+
+      - name: Prepare package files
+        id: packages
+        run: |
+          DEB_FILES=$(find . -name "*.deb" -type f 2>/dev/null | head -1 || echo "")
+          RPM_FILES=$(find . -name "*.rpm" -type f 2>/dev/null | head -1 || echo "")
+          APPIMAGE_FILES=$(find . -name "*.AppImage" -type f 2>/dev/null | head -1 || echo "")
+          
+          if [ -n "$DEB_FILES" ]; then
+            echo "deb_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$DEB_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -n "$RPM_FILES" ]; then
+            echo "rpm_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$RPM_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -n "$APPIMAGE_FILES" ]; then
+            echo "appimage_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$APPIMAGE_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Found DEB: $DEB_FILES"
+          echo "Found RPM: $RPM_FILES"
+          echo "Found AppImage: $APPIMAGE_FILES"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
+        if: steps.packages.outputs.deb_files != '' || steps.packages.outputs.rpm_files != '' || steps.packages.outputs.appimage_files != ''
         with:
           tag_name: ${{ github.ref_name }}
           name: PP Killer ${{ github.ref_name }}
@@ -90,19 +161,20 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.AppImage
+            ${{ steps.packages.outputs.deb_files }}
+            ${{ steps.packages.outputs.rpm_files }}
+            ${{ steps.packages.outputs.appimage_files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
+        if: steps.packages.outputs.deb_files != '' || steps.packages.outputs.rpm_files != '' || steps.packages.outputs.appimage_files != ''
         with:
           name: linux-packages-${{ github.ref_name }}
           path: |
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.AppImage
+            ${{ steps.packages.outputs.deb_files }}
+            ${{ steps.packages.outputs.rpm_files }}
+            ${{ steps.packages.outputs.appimage_files }}
           retention-days: 30
           if-no-files-found: warn
