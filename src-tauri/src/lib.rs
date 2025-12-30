@@ -245,6 +245,9 @@ fn setup_waybar() -> Result<String, String> {
         })
         .unwrap_or_else(|_| format!("{}/.local/bin/ppkiller", home)); // Fallback to local bin
     
+    let mut config_changed = false;
+    
+    // Dodaj definiciju modula ako ne postoji
     if !config.contains("\"custom/ppkiller\"") {
         let module_def = format!(r#"
     "custom/ppkiller": {{
@@ -259,9 +262,71 @@ fn setup_waybar() -> Result<String, String> {
 
         if let Some(pos) = config.find('}') {
             config.insert_str(pos + 1, &module_def);
+            config_changed = true;
         } else {
             return Err("Waybar config format is invalid".to_string());
         }
+    }
+    
+    // Proveri da li je modul već dodat u modules-right ili modules-left
+    let module_in_list = {
+        // Proveri da li postoji u modules-right ili modules-left listi
+        let modules_right_start = config.find("\"modules-right\":");
+        let modules_left_start = config.find("\"modules-left\":");
+        
+        let check_in_section = |start_pos: Option<usize>| -> bool {
+            if let Some(start) = start_pos {
+                if let Some(bracket_start) = config[start..].find('[') {
+                    let list_start = start + bracket_start;
+                    if let Some(bracket_end) = config[list_start..].find(']') {
+                        let list_end = list_start + bracket_end;
+                        let section = &config[list_start..list_end];
+                        return section.contains("\"custom/ppkiller\"");
+                    }
+                }
+            }
+            false
+        };
+        
+        check_in_section(modules_right_start) || check_in_section(modules_left_start)
+    };
+    
+    if !module_in_list {
+        // Uvek dodaj u modules-right
+        if let Some(pos) = config.find("\"modules-right\":") {
+            if let Some(bracket_pos) = config[pos..].find('[') {
+                let insert_pos = pos + bracket_pos + 1;
+                // Proveri da li već postoji neki modul u listi
+                if let Some(first_module) = config[insert_pos..].find('"') {
+                    let actual_pos = insert_pos + first_module;
+                    config.insert_str(actual_pos, "\"custom/ppkiller\",\n        ");
+                    config_changed = true;
+                } else {
+                    // Prazna lista
+                    config.insert_str(insert_pos + 1, "\"custom/ppkiller\"");
+                    config_changed = true;
+                }
+            }
+        } else {
+            // Ako nema modules-right sekcije, kreiraj je
+            // Pronađi gde da je dodamo (najbolje posle modules-center ili na kraju)
+            if let Some(pos) = config.find("\"modules-center\":") {
+                if let Some(closing_bracket) = config[pos..].find(']') {
+                    let insert_pos = pos + closing_bracket + 1;
+                    config.insert_str(insert_pos, ",\n\n  \"modules-right\": [\n    \"custom/ppkiller\"\n  ],");
+                    config_changed = true;
+                }
+            } else {
+                // Dodaj na kraju pre zadnje zagrade
+                if let Some(pos) = config.rfind('}') {
+                    config.insert_str(pos, ",\n\n  \"modules-right\": [\n    \"custom/ppkiller\"\n  ]");
+                    config_changed = true;
+                }
+            }
+        }
+    }
+    
+    if config_changed {
         fs::write(&config_path, config).map_err(|_| "Failed to write waybar config")?;
     }
 
@@ -287,7 +352,11 @@ fn setup_waybar() -> Result<String, String> {
 
     let _ = Command::new("killall").arg("-SIGUSR2").arg("waybar").status();
 
-    Ok("Waybar integrated! Please manually add 'custom/ppkiller' to your 'modules-right' or 'modules-left' in waybar config.".to_string())
+    if module_in_list {
+        Ok("Waybar integrated successfully! The 'custom/ppkiller' module has been added to your Waybar configuration.".to_string())
+    } else {
+        Ok("Waybar integrated! The 'custom/ppkiller' module definition has been added. Please manually add 'custom/ppkiller' to your 'modules-right' or 'modules-left' in waybar config if it's not showing.".to_string())
+    }
 }
 
 // --- Public helpers for main.rs ---
