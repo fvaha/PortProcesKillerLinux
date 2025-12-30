@@ -405,6 +405,17 @@
             </header>
 
             <div class="table-wrap">
+                <!-- Kill all button - only visible in processes view when multiple processes match -->
+                <div id="kill-all-container" style="display: none; margin-bottom: 12px; padding: 8px 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px;">
+                    <button id="kill-all-app-btn" onclick="killAllProcessesByName()" 
+                            style="display: flex; align-items: center; gap: 8px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); 
+                                   color: #f87171; padding: 8px 16px; border-radius: 6px; font-size: 12px; 
+                                   cursor: pointer; font-weight: 600; transition: all 0.2s; width: 100%; justify-content: center;"
+                            onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'" 
+                            onmouseout="this.style.background='rgba(239, 68, 68, 0.2)'">
+                        <i class="fa-solid fa-skull"></i> <span id="kill-all-text">Kill all</span>
+                    </button>
+                </div>
                 <table>
                     <thead id="table-header">
                         <tr id="ports-header">
@@ -792,6 +803,8 @@
                 
                 console.log("Calling fetchProcesses()...");
                 fetchProcesses();
+                // Ažuriraj "Kill all" opciju nakon prebacivanja na processes view
+                setTimeout(updateKillAllOption, 100);
             }
         }
 
@@ -884,6 +897,8 @@
                 allProcesses = await invoke('get_processes');
                 console.log("Received processes:", allProcesses?.length || 0);
                 renderProcesses();
+                // Ažuriraj "Kill all" opciju nakon renderovanja procesa
+                setTimeout(updateKillAllOption, 100);
                 document.getElementById('status-text').innerText = "Last sync: " + new Date().toLocaleTimeString();
             } catch (err) {
                 console.error("Error fetching processes:", err);
@@ -915,6 +930,7 @@
                 renderPorts();
             } else {
                 renderProcesses();
+                updateKillAllOption(); // Ažuriraj "Kill all" opciju nakon promene filtera
             }
         }
 
@@ -1000,19 +1016,40 @@
             // Apply filters
             if (currentFilter === 'high-cpu') {
                 filtered = filtered.filter(p => parseFloat(p.cpu) > 50);
+                // Sortiraj po CPU (opadajuće)
+                filtered.sort((a, b) => {
+                    const cpuA = parseFloat(a.cpu) || 0;
+                    const cpuB = parseFloat(b.cpu) || 0;
+                    return cpuB - cpuA;
+                });
             } else if (currentFilter === 'high-mem') {
                 filtered = filtered.filter(p => parseFloat(p.mem) > 1000); // > 1GB
+                // Sortiraj po memoriji (opadajuće)
+                filtered.sort((a, b) => {
+                    const memA = parseFloat(a.mem) || 0;
+                    const memB = parseFloat(b.mem) || 0;
+                    return memB - memA;
+                });
             } else if (currentFilter === 'web') {
                 filtered = filtered.filter(p => ['node', 'npm', 'yarn', 'pnpm', 'python', 'php', 'apache', 'nginx', 'httpd'].some(term => p.name.toLowerCase().includes(term)));
             } else if (currentFilter === 'database') {
                 filtered = filtered.filter(p => ['mysql', 'postgres', 'mongodb', 'redis', 'mariadb', 'sqlite', 'cassandra'].some(term => p.name.toLowerCase().includes(term)));
             } else if (currentFilter === 'docker') {
                 filtered = filtered.filter(p => p.name.toLowerCase().includes('docker') || p.name.toLowerCase().includes('containerd'));
+            } else if (currentFilter === 'all') {
+                // Sortiraj po CPU opadajuće za "All" filter
+                filtered.sort((a, b) => {
+                    const cpuA = parseFloat(a.cpu) || 0;
+                    const cpuB = parseFloat(b.cpu) || 0;
+                    return cpuB - cpuA;
+                });
             }
 
             body.innerHTML = '';
             if (filtered.length === 0) {
                 body.innerHTML = '<tr><td colspan="6" class="text-center text-slate-500 py-8">No processes found</td></tr>';
+                // Ažuriraj "Kill all" opciju čak i kada nema rezultata
+                updateKillAllOption();
                 return;
             }
 
@@ -1092,8 +1129,102 @@
             window.refreshCurrentView();
         };
         document.getElementById('search-input').oninput = () => {
-            if (currentView === 'ports') renderPorts();
-            else renderProcesses();
+            if (currentView === 'ports') {
+                renderPorts();
+            } else {
+                renderProcesses();
+                updateKillAllOption(); // Prikaži "Kill all" samo u processes view
+            }
+        };
+
+        window.updateKillAllOption = function() {
+            // Prikaži samo u processes view
+            const killAllContainer = document.getElementById('kill-all-container');
+            if (currentView !== 'processes') {
+                if (killAllContainer) killAllContainer.style.display = 'none';
+                return;
+            }
+            
+            const query = document.getElementById('search-input')?.value.trim() || '';
+            
+            if (!killAllContainer) {
+                console.warn('kill-all-container not found in DOM');
+                return;
+            }
+            
+            if (query.length < 2) {
+                killAllContainer.style.display = 'none';
+                return;
+            }
+            
+            // Proveri da li ima procesa sa tim imenom u svim procesima (ne samo filtriranim)
+            if (!allProcesses || allProcesses.length === 0) {
+                killAllContainer.style.display = 'none';
+                return;
+            }
+            
+            // Pronađi sve procese koji se poklapaju sa upitom
+            const matchingProcesses = allProcesses.filter(p => 
+                p.name.toLowerCase().includes(query.toLowerCase())
+            );
+            
+            // Prikaži dugme samo ako ima VIŠE od jednog procesa sa tim imenom
+            if (matchingProcesses.length > 1) {
+                // Pronađi najčešće ime procesa (ako ima više različitih, uzmi prvo)
+                const processNames = [...new Set(matchingProcesses.map(p => p.name))];
+                const appName = processNames[0]; // Uzmi prvo ime kao naziv aplikacije
+                
+                const killAllText = document.getElementById('kill-all-text');
+                if (killAllText) {
+                    killAllText.textContent = `Kill all ${matchingProcesses.length} "${appName}" processes`;
+                }
+                killAllContainer.style.display = 'block';
+                console.log(`Showing kill all button for ${matchingProcesses.length} "${appName}" processes`);
+            } else {
+                killAllContainer.style.display = 'none';
+            }
+        };
+
+        window.killAllProcessesByName = async function() {
+            const query = document.getElementById('search-input')?.value.trim() || '';
+            if (!query || query.length < 2) return;
+            
+            // Pronađi sve procese koji se poklapaju sa upitom
+            if (!allProcesses || allProcesses.length === 0) {
+                alert('No processes available');
+                return;
+            }
+            
+            const matchingProcesses = allProcesses.filter(p => 
+                p.name.toLowerCase().includes(query.toLowerCase())
+            );
+            
+            if (matchingProcesses.length === 0) {
+                alert('No processes found matching your search');
+                return;
+            }
+            
+            // Pronađi najčešće ime procesa (ako ima više različitih, uzmi prvo)
+            const processNames = [...new Set(matchingProcesses.map(p => p.name))];
+            const appName = processNames[0]; // Koristi tačno ime aplikacije
+            
+            if (!confirm(`Kill all ${matchingProcesses.length} "${appName}" processes?`)) {
+                return;
+            }
+            
+            try {
+                if (!invoke) {
+                    alert("Tauri API not loaded");
+                    return;
+                }
+                // Koristi tačno ime aplikacije, ne query
+                const result = await invoke('kill_processes_by_name', { processName: appName });
+                alert(`Successfully killed ${result} "${appName}" process(es)`);
+                setTimeout(window.refreshCurrentView, 500);
+            } catch (err) {
+                console.error("Error killing processes:", err);
+                alert("Failed to kill processes: " + (err.message || err));
+            }
         };
 
         // Initial load - wait for Tauri to be ready

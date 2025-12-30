@@ -86,6 +86,17 @@ fn get_ports_impl() -> Vec<PortInfo> {
     system.refresh_processes(ProcessesToUpdate::All, true);
     let users = Users::new_with_refreshed_list();
 
+    // Sistemski portovi koji se ignorišu (DNS, Samba, CUPS, itd.)
+    let system_ports: HashSet<u16> = [53, 139, 445, 631, 22, 80, 443].iter().cloned().collect();
+    
+    // Sistemski procesi koji se ignorišu
+    let system_processes: HashSet<&str> = [
+        "systemd", "dbus", "NetworkManager", "pipewire", "pulseaudio",
+        "cupsd", "smbd", "nmbd", "avahi-daemon", "systemd-resolved",
+        "systemd-logind", "systemd-udevd", "systemd-timesyncd",
+        "libvirtd", "dnsmasq", "sshd"
+    ].iter().cloned().collect();
+
     let mut ports_map: HashMap<String, PortInfo> = HashMap::new();
     
     // 1. Get all listening ports and their inodes
@@ -99,29 +110,54 @@ fn get_ports_impl() -> Vec<PortInfo> {
     let inode_pid_map = get_pids_for_inodes(&inodes);
     
     for (port, inode) in tcp4 {
+        // Ignoriši sistemske portove
+        if system_ports.contains(&port) {
+            continue;
+        }
+        
         let port_str = port.to_string();
         let pid = inode_pid_map.get(&inode).copied();
         
         let mut process_name = None;
         let mut user = "unknown".to_string();
+        let mut is_system = false;
 
         if let Some(p) = pid {
             let pid_u32 = p as usize;
             if let Some(process) = system.process(Pid::from(pid_u32)) {
                 // Fix: Process::name returns &OsStr, needs to_string_lossy
-                process_name = Some(process.name().to_string_lossy().into_owned());
+                let proc_name = process.name().to_string_lossy().into_owned();
+                
+                // Ignoriši sistemske procese
+                if system_processes.contains(proc_name.as_str()) {
+                    continue;
+                }
+                
+                process_name = Some(proc_name);
                 
                 if let Some(uid) = process.user_id() {
                     if let Some(u) = users.get_user_by_id(uid) {
                         // Fix: User::name returns &str, needs to_string
                         user = u.name().to_string();
+                        // Ignoriši root i sistemske korisnike
+                        if user == "root" || user == "system" || user == "daemon" || user == "nobody" {
+                            is_system = true;
+                        }
                     }
                 }
             } else {
-                user = "root/system".to_string(); 
+                is_system = true;
             }
         } else {
-            user = if port < 1024 { "root".to_string() } else { "unknown".to_string() };
+            // Portovi bez PID-a ili portovi < 1024 su verovatno sistemski
+            if port < 1024 {
+                continue;
+            }
+        }
+
+        // Preskoči sistemske portove i procese
+        if is_system || user == "root" || user == "system" || user == "root/system" {
+            continue;
         }
 
         ports_map.insert(port_str.clone(), PortInfo {
@@ -165,19 +201,49 @@ fn get_processes() -> Vec<ProcessInfo> {
     system.refresh_processes(ProcessesToUpdate::All, true);
     let users = Users::new_with_refreshed_list();
     
+    // Sistemski procesi koji se ignorišu
+    let system_processes: HashSet<&str> = [
+        "systemd", "dbus", "NetworkManager", "pipewire", "pulseaudio",
+        "cupsd", "smbd", "nmbd", "avahi-daemon", "systemd-resolved",
+        "systemd-logind", "systemd-udevd", "systemd-timesyncd",
+        "libvirtd", "dnsmasq", "sshd", "kernel", "kthreadd",
+        "ksoftirqd", "migration", "rcu_", "watchdog", "kworker"
+    ].iter().cloned().collect();
+    
     let mut processes = Vec::new();
     
     for (pid, process) in system.processes() {
+        let proc_name = process.name().to_string_lossy().into_owned();
+        
+        // Ignoriši sistemske procese
+        if system_processes.iter().any(|&sys_proc| proc_name.starts_with(sys_proc)) {
+            continue;
+        }
+        
         let mut user = "unknown".to_string();
+        let mut is_system = false;
+        
         if let Some(uid) = process.user_id() {
              if let Some(u) = users.get_user_by_id(uid) {
                  user = u.name().to_string();
+                 // Ignoriši root i sistemske korisnike
+                 if user == "root" || user == "system" || user == "daemon" || user == "nobody" {
+                     is_system = true;
+                 }
+             } else {
+                 // Ako ne može da nađe korisnika, verovatno je sistemski
+                 is_system = true;
              }
+        }
+
+        // Preskoči sistemske procese
+        if is_system || user == "root" || user == "system" || user == "daemon" {
+            continue;
         }
 
         processes.push(ProcessInfo {
             pid: pid.as_u32() as i32,
-            name: process.name().to_string_lossy().into_owned(),
+            name: proc_name,
             cpu: format!("{:.1}", process.cpu_usage()),
             mem: format!("{:.1}", (process.memory() as f64 / 1024.0 / 1024.0)), // MB
             user,
@@ -202,6 +268,32 @@ fn kill_port(pid: i32) -> bool {
 #[tauri::command]
 fn kill_process(pid: i32) -> bool {
     kill_port_impl(pid)
+}
+
+#[tauri::command]
+fn kill_processes_by_name(process_name: String) -> Result<i32, String> {
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    
+    let mut killed_count = 0;
+    let process_name_lower = process_name.to_lowercase();
+    
+    for (pid, process) in system.processes() {
+        let proc_name = process.name().to_string_lossy().to_lowercase();
+        
+        // Proveri da li se ime procesa poklapa (tačno ili sadrži)
+        if proc_name == process_name_lower || proc_name.contains(&process_name_lower) {
+            if kill_port_impl(pid.as_u32() as i32) {
+                killed_count += 1;
+            }
+        }
+    }
+    
+    if killed_count > 0 {
+        Ok(killed_count)
+    } else {
+        Err(format!("No processes found matching '{}'", process_name))
+    }
 }
 
 #[tauri::command]
@@ -370,19 +462,49 @@ pub fn get_processes_list() -> Vec<ProcessInfo> {
     system.refresh_processes(ProcessesToUpdate::All, true);
     let users = Users::new_with_refreshed_list();
     
+    // Sistemski procesi koji se ignorišu
+    let system_processes: HashSet<&str> = [
+        "systemd", "dbus", "NetworkManager", "pipewire", "pulseaudio",
+        "cupsd", "smbd", "nmbd", "avahi-daemon", "systemd-resolved",
+        "systemd-logind", "systemd-udevd", "systemd-timesyncd",
+        "libvirtd", "dnsmasq", "sshd", "kernel", "kthreadd",
+        "ksoftirqd", "migration", "rcu_", "watchdog", "kworker"
+    ].iter().cloned().collect();
+    
     let mut processes = Vec::new();
     
     for (pid, process) in system.processes() {
+        let proc_name = process.name().to_string_lossy().into_owned();
+        
+        // Ignoriši sistemske procese
+        if system_processes.iter().any(|&sys_proc| proc_name.starts_with(sys_proc)) {
+            continue;
+        }
+        
         let mut user = "unknown".to_string();
+        let mut is_system = false;
+        
         if let Some(uid) = process.user_id() {
              if let Some(u) = users.get_user_by_id(uid) {
                  user = u.name().to_string();
+                 // Ignoriši root i sistemske korisnike
+                 if user == "root" || user == "system" || user == "daemon" || user == "nobody" {
+                     is_system = true;
+                 }
+             } else {
+                 // Ako ne može da nađe korisnika, verovatno je sistemski
+                 is_system = true;
              }
+        }
+
+        // Preskoči sistemske procese
+        if is_system || user == "root" || user == "system" || user == "daemon" {
+            continue;
         }
 
         processes.push(ProcessInfo {
             pid: pid.as_u32() as i32,
-            name: process.name().to_string_lossy().into_owned(),
+            name: proc_name,
             cpu: format!("{:.1}", process.cpu_usage()),
             mem: format!("{:.1}", (process.memory() as f64 / 1024.0 / 1024.0)), // MB
             user,
@@ -412,7 +534,7 @@ pub fn kill_all_ports() {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![get_ports, get_processes, kill_port, kill_process, open_terminal, setup_waybar])
+        .invoke_handler(tauri::generate_handler![get_ports, get_processes, kill_port, kill_process, kill_processes_by_name, open_terminal, setup_waybar])
         .setup(|_app| {
             // Open devtools in development mode
             #[cfg(debug_assertions)]
